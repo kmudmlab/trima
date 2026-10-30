@@ -1,0 +1,242 @@
+--- a/Without-graph-partition/TC.cu
++++ b/trust_kernel.cuh
+@@ -1,18 +1,5 @@
+-#include <iostream>
+-#include "graph.h"
+-#include "wtime.h"
+-#include <queue>
+-#include <set>
+-#include <iterator>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include "herror.h"
+-#include <math.h>
+-#include "TC.cuh"
+-#include <assert.h>
+-
+-// #define dynamic
+-#define static
++// #define dynamic
++#define TRUST_STATIC_UNUSED
+ int BUCKET_SIZE = 100;
+ #define shared_BUCKET_SIZE 6
+ #define SUM_SIZE 1
+@@ -243,10 +230,11 @@
+ 	{
+ 		G_counter = 0;
+ 	}
++	__syncthreads();
+ 	// timetest
+ 	unsigned long long TT = 0, HT = 0, IT = 0;
+ 	unsigned long long __shared__ G_TT, G_HT, G_IT;
+-	G_TT = 0, G_HT = 0, G_IT = 0;
++	if (threadIdx.x == 0) { G_TT = 0; G_HT = 0; G_IT = 0; }
+ 
+ 	int BIN_START = blockIdx.x * block_bucketnum * BUCKET_SIZE;
+ 	// __syncthreads();
+@@ -313,7 +301,7 @@
+ 		{
+ 			while (now < end)
+ 			{
+-				int neighbor = adj_list[now];
++				int neighbor = now < end ? adj_list[now] : 0;
+ 				int neighbor_start = beg_pos[neighbor];
+ 				int neighbor_end = beg_pos[neighbor + 1];
+ 				int neighbor_now = neighbor_start + threadIdx.x;
+@@ -333,7 +321,7 @@
+ 			int superwarp_TID = threadIdx.x % 64;
+ 			int workid = superwarp_TID;
+ 			now = now + superwarp_ID;
+-			int neighbor = adj_list[now];
++			int neighbor = now < end ? adj_list[now] : 0;
+ 			int neighbor_start = beg_pos[neighbor];
+ 			int neighbor_degree = beg_pos[neighbor + 1] - neighbor_start;
+ 			while (now < end)
+@@ -343,7 +331,7 @@
+ 				{
+ 					now += 16;
+ 					workid -= neighbor_degree;
+-					neighbor = adj_list[now];
++					neighbor = now < end ? adj_list[now] : 0;
+ 					neighbor_start = beg_pos[neighbor];
+ 					neighbor_degree = beg_pos[neighbor + 1] - neighbor_start;
+ 				}
+@@ -363,14 +351,14 @@
+ 			while (now < end)
+ 			// while (0)
+ 			{
+-				int neighbor = adj_list[now];
++				int neighbor = now < end ? adj_list[now] : 0;
+ 				int neighbor_start = beg_pos[neighbor];
+ 				int neighbor_end = beg_pos[neighbor + 1];
+ 				while (now < end && workid - (neighbor_end - neighbor_start) >= 0)
+ 				{
+ 					now++;
+ 					workid -= (neighbor_end - neighbor_start);
+-					neighbor = adj_list[now];
++					neighbor = now < end ? adj_list[now] : 0;
+ 					neighbor_start = beg_pos[neighbor];
+ 					neighbor_end = beg_pos[neighbor + 1];
+ 				}
+@@ -493,7 +481,7 @@
+ 		{
+ 			while (now < end)
+ 			{
+-				int neighbor = adj_list[now];
++				int neighbor = now < end ? adj_list[now] : 0;
+ 				int neighbor_start = beg_pos[neighbor];
+ 				int neighbor_end = beg_pos[neighbor + 1];
+ 				int neighbor_now = neighbor_start + WARP_TID;
+@@ -512,7 +500,7 @@
+ 			int workid = WARP_TID;
+ 			while (now < end)
+ 			{
+-				int neighbor = adj_list[now];
++				int neighbor = now < end ? adj_list[now] : 0;
+ 				int neighbor_start = beg_pos[neighbor];
+ 				int neighbor_degree = beg_pos[neighbor + 1] - neighbor_start;
+ 				// neighbor=__shfl_sync(0xffffffff,neighbor,31);
+@@ -523,7 +511,7 @@
+ 				{
+ 					now++;
+ 					workid -= neighbor_degree;
+-					neighbor = adj_list[now];
++					neighbor = now < end ? adj_list[now] : 0;
+ 					neighbor_start = beg_pos[neighbor];
+ 					neighbor_degree = beg_pos[neighbor + 1] - neighbor_start;
+ 				}
+@@ -598,134 +586,4 @@
+ 		// atomicAdd(&GLOBAL_COUNT[3],G_IT);
+ 	}
+ }
+-
+-struct arguments Triangle_count(int rank, char name[100], struct arguments args, int total_process, int n_threads, int n_blocks, int chunk_size)
+-{
+-
+-	// fprintf(stderr,"---------------Here----------------");
+-	int T_Group = 32;
+-	int PER_BLOCK_WARP = n_threads / T_Group;
+-	int total = n_blocks * block_bucketnum * BUCKET_SIZE;
+-	unsigned long long *counter = (unsigned long long *)malloc(sizeof(unsigned long long) * 10);
+-	string json_file = name;
+-	graph *graph_d = new graph(json_file);
+-
+-	// printf("Graph Adj Read: %d",graph_d->adj_list[10]);
+-	// int N_GPUS=argv[1];
+-	int deviceCount;
+-	HRR(cudaGetDeviceCount(&deviceCount));
+-	// fprintf(stderr,"----------------Device count: %d\n",deviceCount);
+-	//  HRR(cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
+-	//  HRR(cudaFuncSetAttribute(dynamic_assign,cudaFuncAttributePreferredSharedMemoryCarveout,16));
+-	// cudaSetDevice();
+-	HRR(cudaSetDevice((rank + 1) % deviceCount));
+-	// cudaDeviceProp devProp;
+-	// HRR(cudaGetDeviceProperties(&devProp, rank));
+-	index_t vertex_count = graph_d->vert_count;
+-	index_t edge_count = graph_d->edge_count;
+-	index_t edge_list_count = graph_d->edge_list_count;
+-	index_t edges = graph_d->edge_count;
+-	/* Preprocessing Step to calculate the ratio */
+-	int *prefix = (int *)malloc(sizeof(int) * vertex_count);
+-	int temp;
+-
+-	int warpfirstvertex = my_binary_search(vertex_count, USE_CTA, graph_d->beg_pos) + 1;
+-
+-	// cout<<my_binary_search(vertex_count,1,graph_d->beg_pos)<<' '<<my_binary_search(vertex_count,0,graph_d->beg_pos)<<endl;
+-	// printf("divide position%d %d %d %d\n",graph_d->beg_pos[warpfirstvertex+1]-graph_d->beg_pos[warpfirstvertex],warpfirstvertex,graph_d->beg_pos[warpfirstvertex]-graph_d->beg_pos[warpfirstvertex-1],graph_d->beg_pos[warpfirstvertex-1]-graph_d->beg_pos[warpfirstvertex-2]);
+-
+-	// fprintf(stderr,"Rank: %d, Devicecount: %d,  Start: %d, End: %d, Selected: %d\n",rank,deviceCount,E_START,E_END,(rank%deviceCount));
+-
+-	// cout<<edge_count<<' '<<rank<<' '<<total_process<<endl;
+-	// for (int i=graph_d->beg_pos[9631];i<graph_d->beg_pos[9632];i++)
+-	// {
+-	// 	cout<<graph_d->adj_list[i]<<endl;
+-	// }
+-	// cout<<vertex_count<<' '<<edge_count<<endl;
+-	// cout<<graph_d->beg_pos[vertex_count-100]<<' '<<graph_d->beg_pos[vertex_count-200]<<endl;
+-
+-	int *hash, *BIN_MEM;
+-	unsigned long long *GLOBAL_COUNT, *g_gettime, *g_maxcollision;
+-	int *G_INDEX;
+-	index_t *d_beg_pos;
+-	vertex_t *d_adj_list, *d_edge_list;
+-	float memory_req = (sizeof(int) * total + sizeof(index_t) * (vertex_count + 1) + sizeof(vertex_t) * (edge_count) + sizeof(vertex_t) * (edge_list_count)) / (1024 * 1024);
+-	// fprintf(stderr,"-------------------GPU: %d, Memory required: %f MB\n",rank,memory_req);
+-	//  printf("%f\n",memory_req);
+-	HRR(cudaMalloc((void **)&GLOBAL_COUNT, sizeof(unsigned long long) * 10));
+-	HRR(cudaMalloc((void **)&g_gettime, sizeof(unsigned long long) * (vertex_count + 1)));
+-	HRR(cudaMalloc((void **)&g_maxcollision, sizeof(unsigned long long) * (vertex_count + 1)));
+-	HRR(cudaMalloc((void **)&G_INDEX, sizeof(int) * 3));
+-	HRR(cudaMalloc((void **)&d_beg_pos, sizeof(index_t) * (vertex_count + 1)));
+-	HRR(cudaMalloc((void **)&d_adj_list, sizeof(vertex_t) * (edge_count)));
+-	// HRR(cudaMalloc((void **) &d_edge_list,sizeof(vertex_t)*(vertex_count+1)));
+-	// Swap edge list count with Eend - estart; --> gives error; may add some more
+ 
+-	// fprintf(stderr,">>>>>>>>>>>>>>>>>Malloc:adj_list[10]: %d\n",graph_d->adj_list[10]);
+-
+-	int nowindex[3];
+-	nowindex[0] = chunk_size * n_blocks * n_threads / T_Group;
+-	nowindex[1] = chunk_size * (n_blocks * total_process + rank);
+-	nowindex[2] = warpfirstvertex + chunk_size * (n_blocks * n_threads / T_Group * total_process + rank);
+-	// unsigned long long cou=0;
+-	// int nowindex=0;
+-
+-	HRR(cudaMemcpy(G_INDEX, &nowindex, sizeof(int) * 3, cudaMemcpyHostToDevice));
+-	// HRR(cudaMemcpy(GLOBAL_COUNT, &cou, sizeof(unsigned long long), cudaMemcpyHostToDevice));
+-	// HRR(cudaMemcpy(d_edge_list,graph_d->edge_list,sizeof(vertex_t)*(vertex_count+1), cudaMemcpyHostToDevice));
+-	HRR(cudaMemcpy(d_beg_pos, graph_d->beg_pos, sizeof(index_t) * (vertex_count + 1), cudaMemcpyHostToDevice));
+-	HRR(cudaMemcpy(d_adj_list, graph_d->adj_list, sizeof(vertex_t) * edge_count, cudaMemcpyHostToDevice));
+-	// fprintf(stderr,">>>>>>>>>>>>>>>>>>>Memcopy completed");
+-	// HRR(cudaDeviceSetLimit(cudaLimitMallocHeapSize, 128*1024*1024));
+-	double t1 = wtime();
+-	double cmp_time;
+-	HRR(cudaMalloc((void **)&BIN_MEM, sizeof(int) * total));
+-
+-	if (1)
+-	{
+-		double time_start = clock();
+-		// HRR(cudaMalloc((void **) &BIN_MEM,sizeof(int)*total));
+-		dynamic_assign<<<n_blocks, n_threads>>>(d_adj_list, d_beg_pos, edge_count, vertex_count, BIN_MEM, GLOBAL_COUNT, rank, total_process, BUCKET_SIZE, T_Group, G_INDEX, chunk_size, warpfirstvertex, g_gettime, g_maxcollision);
+-		HRR(cudaDeviceSynchronize());
+-		// HRR(cudaFree(BIN_MEM));
+-		cmp_time = clock() - time_start;
+-		cmp_time = cmp_time / CLOCKS_PER_SEC;
+-	}
+-	HRR(cudaFree(BIN_MEM));
+-
+-	HRR(cudaMemcpy(counter, GLOBAL_COUNT, sizeof(unsigned long long) * 10, cudaMemcpyDeviceToHost));
+-	// unsigned long long *gettime= new unsigned long long[vertex_count+1];
+-	// HRR(cudaMemcpy(gettime,g_gettime,sizeof(unsigned long long)*(vertex_count+1), cudaMemcpyDeviceToHost));
+-	// unsigned long long *maxcollision= new unsigned long long[vertex_count+1];
+-	// HRR(cudaMemcpy(maxcollision,g_maxcollision,sizeof(unsigned long long)*(vertex_count+1), cudaMemcpyDeviceToHost));
+-
+-	HRR(cudaFree(GLOBAL_COUNT));
+-	HRR(cudaFree(g_gettime));
+-	HRR(cudaFree(g_maxcollision));
+-	HRR(cudaFree(G_INDEX));
+-	HRR(cudaFree(d_beg_pos));
+-	HRR(cudaFree(d_adj_list));
+-	// HRR(cudaFree(d_edge_list));
+-	// free(counter);
+-	free(prefix);
+-	delete graph_d;
+-	args.time = cmp_time;
+-	args.count = counter[0];
+-	// cout<<counter[0]<<endl;
+-	// printf("%lld\n",args.count);
+-	// cout<<counter[1]<<' '<<counter[2]<<' '<<counter[3]<<endl;
+-	// for (int i=0;i<vertex_count;i++)
+-	// 	if (gettime[i]>0)
+-	// 		cout<<gettime[i]<<' '<<graph_d->beg_pos[i+1]-graph_d->beg_pos[i]<<' '<<maxcollision[i]+1<<endl;
+-
+-	// for (int i=0;i<vertex_count;i++)
+-	// 	if (gettime[i]==0&&i%total_process==rank || gettime[i]==1&&i%total_process!=rank)
+-	// 	{
+-	// 		cout<<i<<endl;
+-	// 		break;
+-	// 	}
+-	args.edge_count = edges;
+-	args.degree = edges / vertex_count;
+-	args.vertices = vertex_count;
+-	return args;
+-}

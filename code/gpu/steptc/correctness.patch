@@ -1,0 +1,76 @@
+--- upstream/tricount.cu
++++ adapter/tricount.cu
+@@ -173,6 +173,7 @@
+   hash_bucket_cta = hash_bucket + blockIdx.x * bucket_num * bucket_size;
+ 	unsigned long long __shared__ G_counter;
+ 	if (threadIdx.x==0) G_counter=0;
++    __syncthreads();
+ 
+ 	unsigned long long P_counter=0;
+ 
+@@ -274,6 +275,7 @@
+         while (now<end && workid>=neighbor_degree)
+         {
+           now+=oneTimenbr;
++          if (now>=end) break;
+           workid-=neighbor_degree; 
+           neighbor=dev_block_vertex_value[now]; 
+           neighbor_start=beg_pos[neighbor]; 
+@@ -337,6 +339,7 @@
+   hash_bucket_cta = hash_bucket + blockIdx.x * bucket_num * bucket_size;
+ 	unsigned long long __shared__ G_counter;
+ 	if (threadIdx.x==0) G_counter=0;
++    __syncthreads();
+ 
+ 	unsigned long long P_counter=0;
+ 
+@@ -439,6 +442,7 @@
+         while (now<end && workid>=neighbor_degree)
+         {
+           now+=oneTimenbr;
++          if (now>=end) break;
+           workid-=neighbor_degree; 
+           neighbor=dev_block_vertex_value[now]; 
+           neighbor_start=beg_pos[neighbor]; 
+@@ -501,6 +505,7 @@
+ 	{
+ 		G_counter=0;
+ 	}
++    __syncthreads();
+ 	unsigned long long P_counter=0;
+ 
+ 	Vertex_type WARPID = threadIdx.x/WARPSIZE;
+@@ -553,6 +558,7 @@
+       while (now<end && workid>=neighbor_degree)
+       {
+         now++;
++        if (now>=end) break;
+         workid-=neighbor_degree;
+         neighbor=dev_task2_edge_end[now];
+         neighbor_start=beg_pos[neighbor];
+@@ -760,6 +766,7 @@
+ {
+     Vertex_type src = blockIdx.x * blockDim.x + threadIdx.x;
+     if (src < N) {
++        Dev_CSR_flag[src] = false;
+         if(Dev_CSR_degree[src] > 0)
+         {
+             Dev_CSR_flag[src]   = true;
+@@ -788,6 +795,7 @@
+     Offset_type* Dev_re_CSR_offset;
+     Vertex_type* Dev_re_CSR_adjlist;
+     gpuErrchk( cudaMalloc((void**)&Dev_re_CSR_degree  , sizeof(Offset_type) * (N + 1)));
++    gpuErrchk(cudaMemset(Dev_re_CSR_degree, 0, sizeof(Offset_type)*(N+1)));
+     gpuErrchk( cudaMalloc((void**)&Dev_re_CSR_offset  , sizeof(Offset_type) * (N + 1)));
+     
+ 
+@@ -821,7 +829,9 @@
+     gpuErrchk( cudaMalloc((void**)&Dev_task_CSR_vertex_large  , sizeof(Vertex_type) * (N + 1)));
+     gpuErrchk( cudaMalloc((void**)&Dev_task_CSR_vertex_small  , sizeof(Vertex_type) * (N + 1)));
+     gpuErrchk( cudaMalloc((void**)&Dev_task_CSR_degree_large  , sizeof(Offset_type) * (N + 1)));
++    gpuErrchk(cudaMemset(Dev_task_CSR_degree_large, 0, sizeof(Offset_type)*(N+1)));
+     gpuErrchk( cudaMalloc((void**)&Dev_task_CSR_degree_small  , sizeof(Offset_type) * (N + 1)));
++    gpuErrchk(cudaMemset(Dev_task_CSR_degree_small, 0, sizeof(Offset_type)*(N+1)));
+     gpuErrchk( cudaMalloc((void**)&Dev_task_CSR_offset_large  , sizeof(Offset_type) * (N + 1)));
+     gpuErrchk( cudaMalloc((void**)&Dev_task_CSR_offset_small  , sizeof(Offset_type) * (N + 1)));
+ 

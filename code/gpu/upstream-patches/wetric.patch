@@ -1,0 +1,55 @@
+--- a/tc.cu
++++ b/wetric_instrumented.cu
+@@ -14,6 +14,7 @@
+  */
+ 
+ #include <stdio.h>
++#include <chrono>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <stdint.h>
+@@ -76,6 +77,9 @@
+ typedef struct {
+ 	double copy;
+ 	double exec;
++	double resident;
++ double host_csr;
++ double host_aux;
+ } GPU_time;
+ 
+ /*********
+@@ -313,6 +317,7 @@
+ }
+ 
+ ULONG_t tc_GPU(const GRAPH_TYPE *graph, UINT_t spread, UINT_t adjacency_matrix_len, GPU_time *t) {
++ auto answer_start = std::chrono::steady_clock::now();
+ 	UINT_t *d_Ap;
+ 	UINT_t *d_Ai;
+ 	ULONG_t *d_wedgeSum;
+@@ -367,7 +372,8 @@
+ 	build_binary_search_cache(h_wedgeSum, h_wedgeSum_cache, 0, BINSEARCH_CONSTANT_LEVELS, 0, 0, graph->numVertices);
+ #endif
+ 
+-	checkCudaErrors(cudaEventRecord(GPU_copy_start));
++	t->host_aux = std::chrono::duration<double>(std::chrono::steady_clock::now()-answer_start).count();
++ checkCudaErrors(cudaEventRecord(GPU_copy_start));
+ 
+ 	checkCudaErrors(cudaMalloc((void **)&d_Ap, (graph->numVertices + 1) * sizeof(UINT_t)));
+ 	checkCudaErrors(cudaMalloc((void **)&d_Ai, graph->numEdges * sizeof(UINT_t)));
+@@ -404,6 +410,7 @@
+ 
+ 	int smem_size = (2 * num_threads * spread + 1) * sizeof(UINT_t);
+ 
++	auto resident_start = std::chrono::steady_clock::now();
+ 	checkCudaErrors(cudaEventRecord(GPU_exec_start));
+ 
+ 	tc_GPU_kernel<<<grid, threads, smem_size>>>(d_Ap, d_Ai, d_wedgeSum, wedgeSum_total, graph->numVertices, d_total_count, spread, d_adjacency_matrix, adjacency_matrix_len, adjacency_matrix_size);
+@@ -415,6 +422,8 @@
+ 
+ 	ULONG_t h_total_count = 0;
+ 	checkCudaErrors(cudaMemcpy(&h_total_count, d_total_count, 1 * sizeof(ULONG_t), cudaMemcpyDeviceToHost));
++	t->resident = std::chrono::duration<double>(std::chrono::steady_clock::now()-resident_start).count();
++ t->host_csr = std::chrono::duration<double>(std::chrono::steady_clock::now()-answer_start).count();
+ 
+ 	checkCudaErrors(cudaFree(d_Ap));
+ 	checkCudaErrors(cudaFree(d_Ai));

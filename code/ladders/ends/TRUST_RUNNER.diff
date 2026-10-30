@@ -1,0 +1,59 @@
+--- task35-family-new/run.py
++++ task40-trust-common/run.py
+@@ -1,4 +1,4 @@
+-"""Task28 family correctness only. No clock API and no endpoint-pair input."""
++"""Task40 TRUST timing: validated kernels, task35 family Count boundary."""
+ import statistics,time,argparse,fcntl,hashlib,json,os,re,subprocess,traceback
+ from pathlib import Path
+ import numpy as np
+@@ -34,32 +34,31 @@
+ 
+ def main():
+  ap=argparse.ArgumentParser()
+- for key in ['input','schedule','replay','out']:ap.add_argument('--'+key,type=Path,required=True)
+- ap.add_argument('--reference',type=Path);ap.add_argument('--input-sha',required=True);ap.add_argument('--schedule-sha',required=True)
+- ap.add_argument('--family',choices=['steptc','wetric','tricore'],required=True)
++ for key in ['input','replay','out']:ap.add_argument('--'+key,type=Path,required=True)
++ ap.add_argument('--schedule',type=Path);ap.add_argument('--reference',type=Path);ap.add_argument('--input-sha',required=True);ap.add_argument('--schedule-sha')
++ ap.add_argument('--family',choices=['trust'],required=True)
+  ap.add_argument('--supply',choices=['cache','range'],required=True);ap.add_argument('--expected',type=int,required=True)
+  ap.add_argument('--legacy-anchor',action='store_true')
+  ap.add_argument('--tail',type=int,choices=[0,1],required=True);ap.add_argument('--trisc',type=int,choices=[0,1],required=True);ap.add_argument('--contexts',type=int,choices=[1,2],required=True)
+  ap.add_argument('--validate-only',action='store_true');ap.add_argument('--reps',type=int,default=3)
+  args=ap.parse_args();assert args.reps==3;args.out.mkdir(parents=True,exist_ok=False)
+- assert not args.legacy_anchor and (args.contexts==1 or (args.family=='steptc' and args.tail==1 and args.trisc==1))
+- if args.legacy_anchor:assert args.family=='steptc' and args.supply=='range'
++ assert not args.legacy_anchor and (args.contexts==1 or (args.family in ['steptc','trust'] and args.tail==1 and args.trisc==1))
++ if args.legacy_anchor:assert args.family in ['steptc','trust'] and args.supply=='range'
+  source_dir=P/'anchor-trisc' if args.legacy_anchor else HERE
+  row_pb=1024 if args.legacy_anchor else 16384
+  lock=(Path(__file__).resolve().parents[4]/'hardware.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  wait_device_free(args.out/'device-wait-host.json','before_host_preparation')
+- assert sha(args.input)==args.input_sha and sha(args.schedule)==args.schedule_sha,'input/schedule SHA'
++ assert sha(args.input)==args.input_sha,'input SHA';assert args.schedule is None, 'TRUST is CSR-only'
+  cpu=json.loads(args.replay.read_text());assert len(cpu['engines'])==220
+  raw=np.memmap(args.input,dtype='<u4',mode='r');n,m=map(int,raw[:2]);assert len(raw)==n+m+3
+- schedule=np.memmap(args.schedule,dtype='<u4',mode='r')
+- arrays=[raw[2:n+3],raw[n+3:],schedule]
+- pb=1024 if args.family=='steptc' else 256;chunk_words=256*1024*1024//4
++ arrays=[raw[2:n+3],raw[n+3:]]
++ pb=1024 if args.family in ['steptc','trust'] else 256;chunk_words=256*1024*1024//4
+  tail_first=(n-min(n,65536))//16*16
+  tail_bytes=((((n+16)//16*16-tail_first)*4+64+4095)//4096)*4096
+  sizes=[344064,344064] if args.legacy_anchor else [495616 if args.contexts==2 else 409600]*2+[tail_bytes]
+  assert sum(sizes)<=1392*1024
+  config=dict(family=args.family,supply=args.supply,input_sha256=args.input_sha,schedule_sha256=args.schedule_sha,
+-             endpoint_array=False,source_cap=2240,hash_mix=(0 if args.legacy_anchor else 2) if args.family=='steptc' else None,
++             endpoint_array=False,source_cap=2240,hash_mix=(0 if args.legacy_anchor else 2) if args.family in ['steptc','trust'] else None,
+              source_contexts=args.contexts,tail_on=args.tail,trisc_on=args.trisc,batch=64,arena_words=16384,tail_vertices=65536 if args.tail else 0,merge_gap_units=None if args.legacy_anchor else 13,
+              CSR_row_tensor_page_bytes=row_pb,logical_cache_page_bytes=pb,column_schedule_page_bytes=pb,
+              legacy_anchor=args.legacy_anchor,
+@@ -112,7 +111,7 @@
+   write(args.out/'cb-allocation.json',dict(total_cb_bytes=sum(sizes),descriptor_bytes=sizes,addresses=addresses.tolist(),limit_bytes=1392*1024))
+   cta,setup=accessors(ttnn,tensors,groups,pbs,chunk_words,pb,row_pb)
+   shared=(source_dir/'step_shared.hpp').read_text();metadata=(HERE/'metadata.hpp').read_text()
+-  prefix=f'#define PAGE_BYTES {pb}\n#define PAGE_WORDS {pb//4}\n#define FAMILY {dict(steptc=1,wetric=2,tricore=3)[args.family]}\n#define COUNTERS 0\n#define TRISC_ON {args.trisc}\n#define TAIL_ON {args.tail}\n#define SOURCE_CONTEXTS {args.contexts}\n#define DIRECT {int(args.supply=="range")}\n#define STRESS 0\n'
++  prefix=f'#define PAGE_BYTES {pb}\n#define PAGE_WORDS {pb//4}\n#define FAMILY {dict(steptc=1,wetric=2,tricore=3,trust=4)[args.family]}\n#define COUNTERS 0\n#define TRISC_ON {args.trisc}\n#define TAIL_ON {args.tail}\n#define SOURCE_CONTEXTS {args.contexts}\n#define DIRECT {int(args.supply=="range")}\n#define STRESS 0\n'
+   reader=(source_dir/'step_reader.cpp').read_text().replace('// SHARED',shared).replace('// METADATA_PLAN',metadata).replace('// ACCESSORS',setup).replace('get_timestamp()','uint64_t(0)')
+   worker=(source_dir/'step_worker.cpp').read_text().replace('// SHARED',shared).replace('get_timestamp()','uint64_t(0)')
+   cfg=ttnn.ComputeConfigDescriptor();cfg.fp32_dest_acc_en=True;cfg.dst_full_sync_en=False;cfg.unpack_to_dest_mode=[ttnn.UnpackToDestMode.UnpackToDestFp32]*64

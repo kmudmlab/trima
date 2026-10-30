@@ -1,0 +1,45 @@
+diff --git a/benchmarks/TriangleCounting/ShunTangwongsan15/Triangle.h b/benchmarks/TriangleCounting/ShunTangwongsan15/Triangle.h
+index 09808746..9de66939 100644
+--- a/benchmarks/TriangleCounting/ShunTangwongsan15/Triangle.h
++++ b/benchmarks/TriangleCounting/ShunTangwongsan15/Triangle.h
+@@ -23,6 +23,7 @@
+ #pragma once
+ 
+ #include <algorithm>
++#include <iomanip>
+ 
+ #include "gbbs/gbbs.h"
+ 
+@@ -177,8 +178,8 @@ inline size_t Triangle_degree_ordering(Graph& G, const F& f) {
+   timer rt;
+   rt.start();
+   uintE* rank = rankNodes(G, G.n);
+-  rt.stop();
+-  rt.next("rank time");
++  { double d = rt.stop();  // instrumentation: upstream next() after stop() prints nothing
++    std::cout << std::setprecision(9) << "### rank time: " << d << std::endl; }
+ 
+   // 2. Direct edges to point from lower to higher rank vertices.
+   // Note that we currently only store out-neighbors for this graph to save
+@@ -188,8 +189,8 @@ inline size_t Triangle_degree_ordering(Graph& G, const F& f) {
+   };
+   auto DG = filterGraph(G, pack_predicate);
+   // auto DG = Graph::filterGraph(G, pack_predicate);
+-  gt.stop();
+-  gt.next("build graph time");
++  { double d = gt.stop();
++    std::cout << std::setprecision(9) << "### build graph time: " << d << std::endl; }
+ 
+   // 3. Count triangles on the digraph
+   timer ct;
+@@ -197,8 +198,8 @@ inline size_t Triangle_degree_ordering(Graph& G, const F& f) {
+ 
+   size_t count = CountDirectedBalanced(DG, counts.begin(), f);
+   std::cout << "### Num triangles = " << count << "\n";
+-  ct.stop();
+-  ct.next("count time");
++  { double d = ct.stop();
++    std::cout << std::setprecision(9) << "### count time: " << d << std::endl; }
+   gbbs::free_array(rank, G.n);
+   return count;
+ }

@@ -1,0 +1,18 @@
+--- task35-baseline/run.py
++++ task40-baseline/run.py
+@@ -122,11 +122,12 @@
+             kernels.append(ttnn.KernelDescriptor(kernel_source=code,source_type=ttnn.KernelDescriptor.SourceType.SOURCE_CODE,core_ranges=core_set,compile_time_args=cta,
+                 common_runtime_args=common,runtime_args=[],config=ttnn.ReaderConfigDescriptor() if i==0 else ttnn.WriterConfigDescriptor()))
+         (args.out/'manifest.json').write_text(json.dumps({str(p):sha(p) for p in [Path(__file__),path,*args.out.glob('engine*.cpp')]},indent=2))
+-        discover='#include "api/dataflow/dataflow_api.h"\nvoid kernel_main(){constexpr auto a=TensorAccessorArgs<0>();auto o=TensorAccessor(a,get_common_arg_val<uint32_t>(2),4096);uint32_t p=get_write_ptr(0);((uint32_t*)p)[0]=p;((uint32_t*)p)[1]=get_write_ptr(1);uint32_t id=get_absolute_logical_y()*get_common_arg_val<uint32_t>(3)+get_absolute_logical_x();noc_async_write_tile(id,o,p);noc_async_write_barrier();}'
++        discover='#include "api/dataflow/dataflow_api.h"\nvoid kernel_main(){\n constexpr auto a=TensorAccessorArgs<0>(); auto o=TensorAccessor(a,get_common_arg_val<uint32_t>(2),4096);\n uint32_t p=get_write_ptr(0); auto dst=(uint32_t*)p;\n for(uint32_t i=0;i<2;++i){\n  auto& cb=get_local_cb_interface(i); dst[i*4]=get_write_ptr(i);dst[i*4+1]=cb.fifo_size<<cb_addr_shift;\n  dst[i*4+2]=cb.fifo_limit<<cb_addr_shift;dst[i*4+3]=cb_addr_shift;\n }\n uint32_t id=get_absolute_logical_y()*get_common_arg_val<uint32_t>(3)+get_absolute_logical_x();\n noc_async_write_tile(id,o,p);noc_async_write_barrier();\n}'
+         kd=ttnn.KernelDescriptor(kernel_source=discover,source_type=ttnn.KernelDescriptor.SourceType.SOURCE_CODE,core_ranges=core_set,compile_time_args=list(ttnn.TensorAccessorArgs(output).get_compile_time_args()),common_runtime_args=common,runtime_args=[],config=ttnn.ReaderConfigDescriptor())
+         ttnn.generic_op(buffers+[output],ttnn.ProgramDescriptor(kernels=[kd],semaphores=[],cbs=cbs));ttnn.synchronize_device(dev)
+-        addresses=ttnn.to_torch(output).numpy()[:args.cores,:2];assert np.all(addresses==addresses[0])
+-        (args.out/'cb-allocation-0.json').write_text(json.dumps(dict(cb_addresses=addresses.tolist(),descriptor_bytes=[scratch,scratch],total_cb_bytes=scratch*2,l1_limit_bytes=1392*1024),indent=2)+'\n')
++        addresses=ttnn.to_torch(output).numpy()[:args.cores,:8].astype(np.uint32);assert np.all(addresses==addresses[0])
++        for i in range(2):assert np.all(addresses[:,i*4+1]==scratch) and np.all(addresses[:,i*4+2]-addresses[:,i*4]==scratch)
++        (args.out/'cb-allocation-0.json').write_text(json.dumps(dict(cb_addresses=addresses.tolist(),descriptor_bytes=[scratch,scratch],total_cb_bytes=scratch*2,l1_limit_bytes=1392*1024,runtime_size_verified=True),indent=2)+'\n')
+         program=ttnn.ProgramDescriptor(kernels=kernels,semaphores=[],cbs=cbs)
+         times=[]
+         for rep in range(args.reps+1):
